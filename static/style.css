@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,100..900;1,100..900&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
+
+body {
+  font-family: Arial, sans-serif;
+  background: #eef1f5;
+}
+.cover {
+  width: 500px;
+  margin: 80px auto;
+  background: #fff;
+  padding: 25px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  margin-top: 10px;
+}
+h2 {
+  text-align: center;
+  font-family: "Roboto Condensed", sans-serif;
+  font-weight: 600;
+}
+input[type=file] {
+  width: 100%;
+  margin: 15px 0;
+  font-family: "Roboto", sans-serif;
+  font-weight: 400;
+}
+
+label {
+  font-family: "Roboto", sans-serif;
+  font-weight: 400; 
+}
+
+button {
+  width: 100%;
+  padding: 10px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 15px;
+  cursor: pointer;
+  font-family: "Roboto Condensed", sans-serif;
+  font-weight: 600;
+}
+button:hover {
+  background: #0056b3;
+}
+.result {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f1f3f5;
+  border-radius: 5px;
+  text-align: center;
+}
+.plagiat {
+  color: red;
+  font-weight: bold;
+}
+.aman {
+  color: green;
+  font-weight: bold;
+}
+.error {
+  margin-top: 15px;
+  color: red;
+  text-align: center;
+}
+
+.logo {
+  display: flex;
+  justify-content: center; /* horizontal */
+  align-items: center;     /* vertical */
+  margin-top: 2rem;
+  padding-bottom: 5px;
+}
+
+.logo img {
+  width: 150px;
+  height: 150px;
+}
