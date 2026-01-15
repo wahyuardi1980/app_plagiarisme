@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request
-import pdfplumber, docx, os, math, re, shutil
+import pdfplumber, docx, os, math, re, shutil, time
 from collections import Counter
 from werkzeug.utils import secure_filename
 from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory
@@ -70,21 +70,17 @@ def cosine(t1, t2):
     mag2 = math.sqrt(sum(v*v for v in f2.values()))
     return 0 if mag1 == 0 or mag2 == 0 else (dot / (mag1 * mag2)) * 100
 
-def hybrid(tokens_uji, tokens_ref):
-    return round(
-        (0.5 * rabin_karp(ngrams(tokens_uji), ngrams(tokens_ref))) +
-        (0.5 * cosine(tokens_uji, tokens_ref)),
-        2
-    )
-
 # =====================
 # ROUTE
 # =====================
 @app.route("/", methods=["GET", "POST"])
 def index():
     result = error = None
+    details = []
 
     if request.method == "POST":
+        start_time = time.time()
+
         file = request.files.get("doc")
         if not file or not file.filename.lower().endswith(ALLOWED_EXT):
             error = "Format file tidak didukung"
@@ -92,11 +88,9 @@ def index():
 
         filename = secure_filename(file.filename)
         upload_path = os.path.join(UPLOAD_FOLDER, filename)
-        dataset_path = os.path.join(DATASET_FOLDER, filename)
-
         file.save(upload_path)
 
-        # === PROSES FILE UJI ===
+        # ===== DOKUMEN UJI =====
         text_uji = read_file(upload_path)
         tokens_uji = preprocess(text_uji)
 
@@ -105,9 +99,10 @@ def index():
             error = "Teks terlalu sedikit atau PDF berupa hasil scan"
             return render_template("index.html", error=error)
 
-        scores = []
-        best_match = None
+        best_score = best_rk = best_cs = 0
+        best_ref = None
 
+        # ===== BANDINKAN DENGAN DATASET =====
         for f in os.listdir(DATASET_FOLDER):
             if f.lower().endswith(ALLOWED_EXT):
                 ref_path = os.path.join(DATASET_FOLDER, f)
@@ -117,28 +112,48 @@ def index():
                 if len(tokens_ref) < 30:
                     continue
 
-                score = hybrid(tokens_uji, tokens_ref)
-                scores.append(score)
+                rk = round(rabin_karp(ngrams(tokens_uji), ngrams(tokens_ref)), 2)
+                cs = round(cosine(tokens_uji, tokens_ref), 2)
+                hybrid = round((0.5 * rk) + (0.5 * cs), 2)
 
-        # === SIMPAN KE DATASET ===
-        if not os.path.exists(dataset_path):
-            shutil.copy(upload_path, dataset_path)
+                details.append({
+                    "ref": f,
+                    "rk": rk,
+                    "cs": cs,
+                    "hybrid": hybrid
+                })
+
+                if hybrid > best_score:
+                    best_score = hybrid
+                    best_rk = rk
+                    best_cs = cs
+                    best_ref = f
+
+        process_time = round(time.time() - start_time, 2)
 
         os.remove(upload_path)
 
-        if not scores:
+        if not details:
             result = {
                 "score": 0,
                 "status": "DATASET MASIH KOSONG"
             }
         else:
-            max_score = max(scores)
             result = {
-                "score": max_score,
-                "status": "PLAGIARISME" if max_score >= 50 else "TIDAK PLAGIARISME"
+                "score": best_score,
+                "rk": best_rk,
+                "cs": best_cs,
+                "ref": best_ref,
+                "time": process_time,
+                "status": "PLAGIARISME" if best_score >= 50 else "TIDAK PLAGIARISME"
             }
 
-    return render_template("index.html", result=result, error=error)
+    return render_template(
+        "index.html",
+        result=result,
+        details=details,
+        error=error
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)
