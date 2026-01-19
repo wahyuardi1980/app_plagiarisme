@@ -1,14 +1,17 @@
 from flask import Flask, render_template, request
-import pdfplumber, docx, os, math, re, shutil, time
+import pdfplumber, docx, os, math, re, time, uuid, requests
 from collections import Counter
 from werkzeug.utils import secure_filename
 from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory
 
+# =====================
+# APP CONFIG
+# =====================
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 DATASET_FOLDER = "dataset"
-ALLOWED_EXT = (".pdf", ".docx")
+ALLOWED_EXT = (".pdf", ".docx", ".txt")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATASET_FOLDER, exist_ok=True)
@@ -25,16 +28,19 @@ STOPWORDS = set(stop_factory.get_stop_words())
 def read_file(path):
     text = ""
     try:
-        if path.lower().endswith(".pdf"):
+        if path.endswith(".pdf"):
             with pdfplumber.open(path) as pdf:
                 for page in pdf.pages:
                     t = page.extract_text()
                     if t:
                         text += t + " "
-        elif path.lower().endswith(".docx"):
+        elif path.endswith(".docx"):
             doc = docx.Document(path)
             for p in doc.paragraphs:
                 text += p.text + " "
+        elif path.endswith(".txt"):
+            with open(path, encoding="utf8") as f:
+                text = f.read()
     except:
         pass
     return text.lower()
@@ -48,13 +54,44 @@ def preprocess(text):
     return [t for t in tokens if t not in STOPWORDS and len(t) > 2]
 
 # =====================
+# KEYWORD EXTRACTION
+# =====================
+def extract_keywords(tokens, top_n=5):
+    freq = Counter(tokens)
+    return " ".join([w for w, _ in freq.most_common(top_n)])
+
+# =====================
+# FETCH API & STORE DATASET
+# =====================
+def fetch_and_store_journals(query, limit=5):
+    url = "https://api.semanticscholar.org/graph/v1/paper/search"
+    params = {
+        "query": query,
+        "limit": limit,
+        "fields": "title,abstract"
+    }
+
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json().get("data", [])
+
+        for paper in data:
+            abstract = paper.get("abstract")
+            if abstract and len(abstract) > 200:
+                fname = f"api_{uuid.uuid4().hex}.txt"
+                with open(os.path.join(DATASET_FOLDER, fname), "w", encoding="utf8") as f:
+                    f.write(abstract.lower())
+    except Exception as e:
+        print("API ERROR:", e)
+
+# =====================
 # NGRAM
 # =====================
 def ngrams(tokens, n=3):
     return [" ".join(tokens[i:i+n]) for i in range(len(tokens)-n+1)]
 
 # =====================
-# SIMILARITY
+# RABIN-KARP
 # =====================
 def rabin_karp(ng1, ng2):
     s1, s2 = set(ng1), set(ng2)
@@ -62,6 +99,9 @@ def rabin_karp(ng1, ng2):
         return 0
     return (len(s1 & s2) / len(s1)) * 100
 
+# =====================
+# COSINE SIMILARITY
+# =====================
 def cosine(t1, t2):
     f1, f2 = Counter(t1), Counter(t2)
     common = set(f1) & set(f2)
@@ -96,15 +136,19 @@ def index():
 
         if len(tokens_uji) < 30:
             os.remove(upload_path)
-            error = "Teks terlalu sedikit atau PDF berupa hasil scan"
+            error = "Teks terlalu sedikit / PDF scan"
             return render_template("index.html", error=error)
+
+        # ===== AUTO DATASET DARI API =====
+        query = extract_keywords(tokens_uji)
+        fetch_and_store_journals(query, limit=5)
 
         best_score = best_rk = best_cs = 0
         best_ref = None
 
-        # ===== BANDINKAN DENGAN DATASET =====
+        # ===== PERBANDINGAN =====
         for f in os.listdir(DATASET_FOLDER):
-            if f.lower().endswith(ALLOWED_EXT):
+            if f.endswith(ALLOWED_EXT):
                 ref_path = os.path.join(DATASET_FOLDER, f)
                 text_ref = read_file(ref_path)
                 tokens_ref = preprocess(text_ref)
@@ -114,7 +158,7 @@ def index():
 
                 rk = round(rabin_karp(ngrams(tokens_uji), ngrams(tokens_ref)), 2)
                 cs = round(cosine(tokens_uji, tokens_ref), 2)
-                hybrid = round((0.5 * rk) + (0.5 * cs), 2)
+                hybrid = round((rk + cs) / 2, 2)
 
                 details.append({
                     "ref": f,
@@ -130,14 +174,10 @@ def index():
                     best_ref = f
 
         process_time = round(time.time() - start_time, 2)
-
         os.remove(upload_path)
 
         if not details:
-            result = {
-                "score": 0,
-                "status": "DATASET MASIH KOSONG"
-            }
+            result = {"score": 0, "status": "DATASET KOSONG"}
         else:
             result = {
                 "score": best_score,
@@ -148,12 +188,10 @@ def index():
                 "status": "PLAGIARISME" if best_score >= 50 else "TIDAK PLAGIARISME"
             }
 
-    return render_template(
-        "index.html",
-        result=result,
-        details=details,
-        error=error
-    )
+    return render_template("index.html", result=result, details=details, error=error)
 
+# =====================
+# RUN
+# =====================
 if __name__ == "__main__":
     app.run(debug=True)
